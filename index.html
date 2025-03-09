@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SF Tech Bro Side-Scroller</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #222;
+      font-family: 'Courier New', monospace;
+    }
+    
+    #game-container {
+      position: relative;
+    }
+    
+    canvas {
+      display: block;
+      border: 4px solid #444;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    
+    #game-ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      text-shadow: 2px 2px 0 #000;
+      font-size: 20px;
+    }
+    
+    #start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      font-size: 24px;
+    }
+    
+    #start-button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+    }
+    
+    #game-over {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      font-size: 24px;
+    }
+    
+    #restart-button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background-color: #f44336;
+      color: white;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div id="game-ui">
+      <div>EQUITY: <span id="score">0</span></div>
+    </div>
+    <div id="start-screen">
+      <div>SF TECH BRO ADVENTURE</div>
+      <div style="font-size: 16px; margin-top: 10px;">Collect startup equity and avoid the obstacles!</div>
+      <button id="start-button">START</button>
+    </div>
+    <div id="game-over">
+      <div>GAME OVER</div>
+      <div style="font-size: 18px; margin-top: 10px;">Your equity: <span id="final-score">0</span></div>
+      <button id="restart-button">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script>
+    // Game canvas and context
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // UI elements
+    const scoreElement = document.getElementById('score');
+    const startScreen = document.getElementById('start-screen');
+    const startButton = document.getElementById('start-button');
+    const gameOverScreen = document.getElementById('game-over');
+    const restartButton = document.getElementById('restart-button');
+    const finalScoreElement = document.getElementById('final-score');
+    
+    // Game constants
+    const GRAVITY = 0.5;
+    const JUMP_FORCE = -15;
+    const PLAYER_SPEED = 5;
+    const GROUND_HEIGHT = 80;
+    const PLATFORM_SPEED = 3.4; // Reduced by 15% from original 4
+    
+    // Game state
+    let gameRunning = false;
+    let score = 0;
+    let scrollOffset = 0;
+    
+    // Game objects
+    let player = {
+      x: 100,
+      y: 0,
+      width: 40,
+      height: 60,
+      velocityY: 0,
+      jumping: false,
+      frameX: 0,
+      frameTimer: 0,
+      isMoving: false
+    };
+    
+    // Define SF backgrounds (layers for parallax effect)
+    const backgrounds = [
+      { img: null, speed: 0.2, x: 0 }, // Sky
+      { img: null, speed: 0.4, x: 0 }, // Distant buildings
+      { img: null, speed: 0.6, x: 0 }, // Mid buildings
+      { img: null, speed: 0.8, x: 0 }  // Close buildings
+    ];
+    
+    // Create placeholder images for our layers
+    function createBackgroundLayers() {
+      // Sky layer
+      backgrounds[0].img = createSkyLayer();
+      
+      // Distant buildings (Golden Gate, etc)
+      backgrounds[1].img = createDistantBuildingsLayer();
+      
+      // Mid buildings
+      backgrounds[2].img = createMidBuildingsLayer();
+      
+      // Close buildings
+      backgrounds[3].img = createCloseBuildingsLayer();
+    }
+    
+    function createSkyLayer() {
+      const layer = document.createElement('canvas');
+      layer.width = canvas.width;
+      layer.height = canvas.height;
+      const layerCtx = layer.getContext('2d');
+      
+      // Gradient sky
+      const gradient = layerCtx.createLinearGradient(0, 0, 0, canvas.height - GROUND_HEIGHT);
+      gradient.addColorStop(0, '#66a1ff');
+      gradient.addColorStop(1, '#99ccff');
+      layerCtx.fillStyle = gradient;
+      layerCtx.fillRect(0, 0, layer.width, layer.height);
+      
+      // Add some clouds
+      layerCtx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      for (let i = 0; i < 10; i++) {
+        const cloudX = Math.random() * layer.width;
+        const cloudY = Math.random() * (canvas.height / 2);
+        const cloudWidth = 60 + Math.random() * 40;
+        const cloudHeight = 20 + Math.random() * 10;
+        
+        layerCtx.beginPath();
+        layerCtx.ellipse(cloudX, cloudY, cloudWidth / 2, cloudHeight / 2, 0, 0, Math.PI * 2);
+        layerCtx.fill();
+      }
+      
+      return layer;
+    }
+    
+    function createDistantBuildingsLayer() {
+      const layer = document.createElement('canvas');
+      layer.width = canvas.width * 2; // Make it wider for scrolling
+      layer.height = canvas.height;
+      const layerCtx = layer.getContext('2d');
+      
+      // Draw Golden Gate Bridge silhouette
+      layerCtx.fillStyle = '#bb3333';
+      
+      // Bridge towers
+      layerCtx.fillRect(300, 100, 20, 220);
+      layerCtx.fillRect(700, 100, 20, 220);
+      
+      // Bridge span
+      layerCtx.fillRect(300, 140, 420, 10);
+      
+      // Cables
+      layerCtx.strokeStyle = '#bb3333';
+      layerCtx.lineWidth = 3;
+      layerCtx.beginPath();
+      layerCtx.moveTo(300, 100);
+      layerCtx.quadraticCurveTo(510, 180, 720, 100);
+      layerCtx.stroke();
+      
+      layerCtx.beginPath();
+      layerCtx.moveTo(300, 120);
+      layerCtx.quadraticCurveTo(510, 200, 720, 120);
+      layerCtx.stroke();
+      
+      // Coit Tower
+      layerCtx.fillStyle = '#dddddd';
+      layerCtx.fillRect(850, 120, 30, 200);
+      layerCtx.fillRect(840, 100, 50, 20);
+      
+      // Transamerica Pyramid
+      layerCtx.fillStyle = '#bbbbbb';
+      layerCtx.beginPath();
+      layerCtx.moveTo(950, 320);
+      layerCtx.lineTo(980, 320);
+      layerCtx.lineTo(965, 100);
+      layerCtx.closePath();
+      layerCtx.fill();
+      
+      // Salesforce Tower
+      layerCtx.fillStyle = '#99aacc';
+      layerCtx.beginPath();
+      layerCtx.ellipse(1100, 180, 20, 140, 0, 0, Math.PI * 2);
+      layerCtx.fill();
+      
+      return layer;
+    }
+    
+    function createMidBuildingsLayer() {
+      const layer = document.createElement('canvas');
+      layer.width = canvas.width * 2; // Make it wider for scrolling
+      layer.height = canvas.height;
+      const layerCtx = layer.getContext('2d');
+      
+      // Draw some mid-distance SF-style buildings
+      for (let i = 0; i < 20; i++) {
+        const buildingX = i * 80;
+        const buildingHeight = 100 + Math.random() * 120;
+        const buildingWidth = 60 + Math.random() * 20;
+        
+        // Building color
+        layerCtx.fillStyle = ['#6677aa', '#778899', '#99aabb'][Math.floor(Math.random() * 3)];
+        
+        // Main building
+        layerCtx.fillRect(buildingX, canvas.height - GROUND_HEIGHT - buildingHeight, buildingWidth, buildingHeight);
+        
+        // Windows
+        layerCtx.fillStyle = '#ffffff';
+        for (let wy = 0; wy < buildingHeight - 20; wy += 15) {
+          for (let wx = 0; wx < buildingWidth - 10; wx += 15) {
+            if (Math.random() > 0.3) {
+              layerCtx.fillRect(buildingX + 5 + wx, canvas.height - GROUND_HEIGHT - buildingHeight + 5 + wy, 10, 10);
+            }
+          }
+        }
+      }
+      
+      return layer;
+    }
+    
+    function createCloseBuildingsLayer() {
+      const layer = document.createElement('canvas');
+      layer.width = canvas.width * 3; // Make it wider for scrolling
+      layer.height = canvas.height;
+      const layerCtx = layer.getContext('2d');
+      
+      // Draw Victorian houses and close buildings
+      const colors = ['#cc8866', '#ddaa77', '#eeccaa', '#aa7755', '#ddbb88'];
+      
+      for (let i = 0; i < 15; i++) {
+        const houseX = i * 160;
+        const houseHeight = 140 + Math.random() * 60;
+        const houseWidth = 120;
+        
+        // Main house
+        layerCtx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+        layerCtx.fillRect(houseX, canvas.height - GROUND_HEIGHT - houseHeight, houseWidth, houseHeight);
+        
+        // Roof
+        layerCtx.fillStyle = '#aa6644';
+        layerCtx.beginPath();
+        layerCtx.moveTo(houseX - 10, canvas.height - GROUND_HEIGHT - houseHeight);
+        layerCtx.lineTo(houseX + houseWidth + 10, canvas.height - GROUND_HEIGHT - houseHeight);
+        layerCtx.lineTo(houseX + houseWidth / 2, canvas.height - GROUND_HEIGHT - houseHeight - 30);
+        layerCtx.closePath();
+        layerCtx.fill();
+        
+        // Windows
+        layerCtx.fillStyle = '#eeeeff';
+        for (let j = 0; j < 3; j++) {
+          layerCtx.fillRect(houseX + 20 + j * 30, canvas.height - GROUND_HEIGHT - houseHeight + 40, 20, 30);
+          layerCtx.fillRect(houseX + 20 + j * 30, canvas.height - GROUND_HEIGHT - houseHeight + 80, 20, 30);
+        }
+        
+        // Door
+        layerCtx.fillStyle = '#884422';
+        layerCtx.fillRect(houseX + 50, canvas.height - GROUND_HEIGHT - 60, 25, 60);
+        
+        // Steps
+        layerCtx.fillStyle = '#aaaaaa';
+        layerCtx.fillRect(houseX + 40, canvas.height - GROUND_HEIGHT - 15, 45, 15);
+        layerCtx.fillRect(houseX + 45, canvas.height - GROUND_HEIGHT - 30, 35, 15);
+      }
+      
+      return layer;
+    }
+    
+    // Game objects
+    let obstacles = [];
+    let equities = [];
+    let platformSections = [];
+    
+    // Create platform sections
+    function createPlatformSections() {
+      const sectionWidth = 800;
+      const numSections = 20;
+      
+      platformSections = [];
+      for (let i = 0; i < numSections; i++) {
+        platformSections.push({
+          x: i * sectionWidth,
+          width: sectionWidth
+        });
+      }
+    }
+    
+    // Create poop obstacles
+    function createObstacles() {
+      obstacles = [];
+      
+      // Calculate safe jump distance based on game physics
+      // JUMP_FORCE = -15, GRAVITY = 0.5, PLATFORM_SPEED = 3.4
+      // This calculation ensures player can always clear obstacles when jumping
+      const minJumpDistance = 220; // Minimum safe distance between obstacles
+      
+      // Start with first obstacle
+      let lastObstacleX = 1000; // First obstacle position
+      
+      // Add 15 poop obstacles with guaranteed safe spacing
+      for (let i = 0; i < 15; i++) {
+        obstacles.push({
+          x: lastObstacleX,
+          y: canvas.height - GROUND_HEIGHT - 20,
+          width: 25,
+          height: 25,
+          type: 'poop',
+          hit: false
+        });
+        
+        // Add variation but ensure minimum safe distance
+        // This ensures the player can always make the jump if timed correctly
+        const variation = 100 + Math.random() * 250; // Random additional spacing
+        lastObstacleX += minJumpDistance + variation;
+      }
+    }
+    
+    // Create equity coins
+    function createEquity() {
+      equities = [];
+      
+      // Single equities
+      for (let i = 0; i < 30; i++) {
+        equities.push({
+          x: 800 + Math.random() * 5000,
+          y: canvas.height - GROUND_HEIGHT - 40 - Math.random() * 80,
+          width: 25,
+          height: 25,
+          collected: false
+        });
+      }
+      
+      // Equity patterns
+      for (let i = 0; i < 5; i++) {
+        const patternX = 1500 + i * 800;
+        const patternY = canvas.height - GROUND_HEIGHT - 100;
+        
+        // Arc pattern
+        for (let j = 0; j < 5; j++) {
+          equities.push({
+            x: patternX + j * 40,
+            y: patternY - Math.sin(j * Math.PI / 4) * 60,
+            width: 25,
+            height: 25,
+            collected: false
+          });
+        }
+      }
+    }
+    
+    // Initialize the game
+    function initGame() {
+      score = 0;
+      scrollOffset = 0;
+      
+      // Reset player
+      player = {
+        x: 100,
+        y: canvas.height - GROUND_HEIGHT - 60,
+        width: 40,
+        height: 60,
+        velocityY: 0,
+        jumping: false,
+        frameX: 0,
+        frameTimer: 0,
+        isMoving: false
+      };
+      
+      // Create game elements
+      createBackgroundLayers();
+      createPlatformSections();
+      createObstacles();
+      createEquity();
+      
+      // Update score display
+      scoreElement.textContent = score;
+    }
+    
+    // Draw player character
+    function drawPlayer() {
+      ctx.fillStyle = '#3a86ff';
+      
+      // Hoodie
+      ctx.fillRect(player.x, player.y, player.width, player.height - 20);
+      
+      // Head
+      ctx.fillStyle = '#ffb703';
+      ctx.fillRect(player.x + 5, player.y - 20, player.width - 10, 20);
+      
+      // Face
+      ctx.fillStyle = '#000';
+      ctx.fillRect(player.x + 25, player.y - 15, 5, 5); // Eye
+      ctx.fillRect(player.x + 20, player.y - 5, 10, 2); // Mouth
+      
+      // Legs
+      ctx.fillStyle = '#444';
+      ctx.fillRect(player.x + 5, player.y + player.height - 20, 10, 20);
+      ctx.fillRect(player.x + player.width - 15, player.y + player.height - 20, 10, 20);
+      
+      // Animate walking (simple frame change)
+      if (player.isMoving && !player.jumping) {
+        player.frameTimer++;
+        if (player.frameTimer > 10) {
+          player.frameX = (player.frameX + 1) % 2;
+          player.frameTimer = 0;
+          
+          // Alternate leg positions
+          if (player.frameX === 0) {
+            ctx.fillRect(player.x + 5, player.y + player.height - 20, 10, 20);
+            ctx.fillRect(player.x + player.width - 15, player.y + player.height - 20, 10, 20);
+          } else {
+            ctx.fillRect(player.x + 10, player.y + player.height - 20, 10, 20);
+            ctx.fillRect(player.x + player.width - 20, player.y + player.height - 20, 10, 20);
+          }
+        }
+      }
+    }
+    
+    // Draw platform/ground
+    function drawPlatform() {
+      // Draw hillside below ground
+      ctx.fillStyle = '#8d6e63';
+      ctx.fillRect(0, canvas.height - GROUND_HEIGHT + 5, canvas.width, GROUND_HEIGHT);
+      
+      // Draw ground
+      ctx.fillStyle = '#8bc34a';
+      ctx.fillRect(0, canvas.height - GROUND_HEIGHT, canvas.width, 5);
+      
+      // Draw platform sections
+      for (const section of platformSections) {
+        const sectionX = section.x - scrollOffset;
+        if (sectionX < canvas.width && sectionX + section.width > 0) {
+          // Sidewalk
+          ctx.fillStyle = '#e0e0e0';
+          ctx.fillRect(sectionX, canvas.height - GROUND_HEIGHT, section.width, 20);
+          
+          // Curb
+          ctx.fillStyle = '#9e9e9e';
+          ctx.fillRect(sectionX, canvas.height - GROUND_HEIGHT + 20, section.width, 5);
+          
+          // Street
+          ctx.fillStyle = '#616161';
+          ctx.fillRect(sectionX, canvas.height - GROUND_HEIGHT + 25, section.width, GROUND_HEIGHT - 25);
+          
+          // Street markings
+          ctx.fillStyle = '#f5f5f5';
+          for (let i = 0; i < section.width; i += 100) {
+            ctx.fillRect(sectionX + i, canvas.height - GROUND_HEIGHT + 55, 50, 5);
+          }
+        }
+      }
+    }
+    
+    // Draw obstacles
+    function drawObstacles() {
+      for (const obstacle of obstacles) {
+        const obstacleX = obstacle.x - scrollOffset;
+        
+        if (obstacleX < canvas.width && obstacleX + obstacle.width > 0 && !obstacle.hit) {
+          // Draw actual poop emoji (UTF-16: 0xD83D 0xDCA9 / Unicode: U+1F4A9)
+          ctx.font = '24px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('💩', obstacleX + obstacle.width / 2, obstacle.y + obstacle.height / 2);
+        }
+      }
+    }
+    
+    // Draw equity coins
+    function drawEquity() {
+      for (const equity of equities) {
+        const equityX = equity.x - scrollOffset;
+        
+        if (equityX < canvas.width && equityX + equity.width > 0 && !equity.collected) {
+          // Draw equity coin
+          ctx.fillStyle = '#ffab00';
+          ctx.beginPath();
+          ctx.arc(equityX + equity.width / 2, equity.y + equity.height / 2, equity.width / 2, 0, Math.PI * 2);
+          ctx.fill();
+          
+          // Draw $ symbol
+          ctx.fillStyle = '#fff';
+          ctx.font = '16px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('$', equityX + equity.width / 2, equity.y + equity.height / 2);
+        }
+      }
+    }
+    
+    // Draw the backgrounds with parallax effect
+    function drawBackgrounds() {
+      for (let i = 0; i < backgrounds.length; i++) {
+        const bg = backgrounds[i];
+        const bgX = -(scrollOffset * bg.speed) % bg.img.width;
+        
+        ctx.drawImage(bg.img, bgX, 0);
+        ctx.drawImage(bg.img, bgX + bg.img.width, 0);
+      }
+    }
+    
+    // Update player position and check collisions
+    function updatePlayer() {
+      // Apply gravity
+      player.velocityY += GRAVITY;
+      player.y += player.velocityY;
+      
+      // Check ground collision
+      if (player.y + player.height > canvas.height - GROUND_HEIGHT) {
+        player.y = canvas.height - GROUND_HEIGHT - player.height;
+        player.velocityY = 0;
+        player.jumping = false;
+      }
+      
+      // Move the world (scroll offset)
+      scrollOffset += PLATFORM_SPEED;
+      
+      // Check if we need to generate more obstacles and equity
+      // When the player reaches 70% through the current obstacles
+      const lastObstacleX = obstacles.length > 0 ? 
+                           Math.max(...obstacles.map(o => o.x)) : 0;
+      const lastEquityX = equities.length > 0 ? 
+                          Math.max(...equities.map(e => e.x)) : 0;
+      
+      if (scrollOffset + canvas.width > lastObstacleX - 1000) {
+        generateMoreObstacles(lastObstacleX);
+      }
+      
+      if (scrollOffset + canvas.width > lastEquityX - 1000) {
+        generateMoreEquity(lastEquityX);
+      }
+      
+      // Check obstacle collisions
+      for (const obstacle of obstacles) {
+        if (!obstacle.hit && 
+            player.x < obstacle.x - scrollOffset + obstacle.width &&
+            player.x + player.width > obstacle.x - scrollOffset &&
+            player.y < obstacle.y + obstacle.height &&
+            player.y + player.height > obstacle.y) {
+          // Collision with obstacle - game over
+          gameOver();
+          return;
+        }
+      }
+      
+      // Check equity collection
+      for (const equity of equities) {
+        if (!equity.collected && 
+            player.x < equity.x - scrollOffset + equity.width &&
+            player.x + player.width > equity.x - scrollOffset &&
+            player.y < equity.y + equity.height &&
+            player.y + player.height > equity.y) {
+          // Collect equity
+          equity.collected = true;
+          score += 10;
+          scoreElement.textContent = score;
+        }
+      }
+      
+      // Clean up obstacles and equity that are far behind the player
+      // This prevents the arrays from growing infinitely and affecting performance
+      obstacles = obstacles.filter(o => o.x > scrollOffset - 500);
+      equities = equities.filter(e => e.x > scrollOffset - 500 || !e.collected);
+    }
+    
+    // Generate more obstacles as the player progresses
+    function generateMoreObstacles(lastX) {
+      const minJumpDistance = 220; // Minimum safe distance between obstacles
+      let nextX = lastX;
+      
+      // Add more obstacles
+      for (let i = 0; i < 10; i++) {
+        // Add variation but ensure minimum safe distance
+        const variation = 100 + Math.random() * 250;
+        nextX += minJumpDistance + variation;
+        
+        obstacles.push({
+          x: nextX,
+          y: canvas.height - GROUND_HEIGHT - 20,
+          width: 25,
+          height: 25,
+          type: 'poop',
+          hit: false
+        });
+      }
+    }
+    
+    // Generate more equity as the player progresses
+    function generateMoreEquity(lastX) {
+      let nextX = lastX > 0 ? lastX : 800;
+      
+      // Add single equities
+      for (let i = 0; i < 15; i++) {
+        nextX += 50 + Math.random() * 200;
+        
+        equities.push({
+          x: nextX,
+          y: canvas.height - GROUND_HEIGHT - 40 - Math.random() * 80,
+          width: 25,
+          height: 25,
+          collected: false
+        });
+      }
+      
+      // Add some patterns
+      for (let i = 0; i < 3; i++) {
+        nextX += 400;
+        const patternY = canvas.height - GROUND_HEIGHT - 100;
+        
+        // Arc pattern
+        for (let j = 0; j < 5; j++) {
+          equities.push({
+            x: nextX + j * 40,
+            y: patternY - Math.sin(j * Math.PI / 4) * 60,
+            width: 25,
+            height: 25,
+            collected: false
+          });
+        }
+      }
+    }
+    
+    // Game loop
+    function gameLoop() {
+      if (!gameRunning) return;
+      
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw backgrounds
+      drawBackgrounds();
+      
+      // Draw game elements
+      drawPlatform();
+      drawObstacles();
+      drawEquity();
+      drawPlayer();
+      
+      // Update game state
+      updatePlayer();
+      
+      // Continue the game loop
+      requestAnimationFrame(gameLoop);
+    }
+    
+    // Handle keyboard input
+    const keys = {};
+    
+    window.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+      
+      // Jump when Space or Up arrow is pressed
+      if ((e.key === ' ' || e.key === 'ArrowUp') && !player.jumping && gameRunning) {
+        player.velocityY = JUMP_FORCE;
+        player.jumping = true;
+      }
+    });
+    
+    window.addEventListener('keyup', (e) => {
+      keys[e.key] = false;
+    });
+    
+    // Start the game
+    function startGame() {
+      startScreen.style.display = 'none';
+      gameOverScreen.style.display = 'none';
+      gameRunning = true;
+      initGame();
+      gameLoop();
+    }
+    
+    // Game over
+    function gameOver() {
+      gameRunning = false;
+      gameOverScreen.style.display = 'flex';
+      finalScoreElement.textContent = score;
+    }
+    
+    // Event listeners for buttons
+    startButton.addEventListener('click', startGame);
+    restartButton.addEventListener('click', startGame);
+    
+    // Initial setup
+    initGame();
+  </script>
+</body>
+</html>
